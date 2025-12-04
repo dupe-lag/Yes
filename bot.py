@@ -8,9 +8,10 @@ import phonenumbers
 from phonenumbers import carrier, geocoder, timezone
 import socket
 import urllib.parse
+import os # 1. Import os for token security
 
-
-TOKEN = "8289958887:AAFrdtHwtDSZyfI77ECJONkAMXkEF0QbQIQ"
+# 2. Get token from environment variable for security
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8289958887:AAFrdtHwtDSZyfI77ECJONkAMXkEF0QbQIQ") 
 
 
 logging.basicConfig(
@@ -147,6 +148,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == 'tg_id':
         await tg_get_id(update, text)
     
+    # 3. CRITICAL FIX: Clear user state to prevent bot from getting stuck
+    if user_id in user_data: 
+        del user_data[user_id]
+    
     
     keyboard = [[InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_to_menu')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -170,7 +175,8 @@ async def username_search(update: Update, username):
             "YouTube": f"https://youtube.com/@{username}",
             "Twitch": f"https://twitch.tv/{username}",
             "TikTok": f"https://tiktok.com/@{username}",
-            "Spotify": f"https://open.spotify.com/user/{username}",
+            # 4. Corrected Spotify URL (using google search query instead of broken URL)
+            "Spotify": f"https://www.google.com/search?q=spotify+user+{username}", 
             "Medium": f"https://medium.com/@{username}"
         }
         
@@ -196,9 +202,14 @@ async def username_search(update: Update, username):
                             results.append(f"❌ {platform}: не найден")
                     else:
                         results.append(f"✅ {platform}: {url}")
+                elif platform == "Spotify": # 5. Special check for Spotify/Google
+                    if "did not match any documents" not in response.text:
+                         results.append(f"✅ {platform}: {url}")
+                    else:
+                         results.append(f"❌ {platform}: не найден")
                 else:
                     results.append(f"❌ {platform}: не найден")
-            except:
+            except requests.exceptions.RequestException: # 6. Specific error handling
                 results.append(f"❌ {platform}: ошибка проверки")
         
         
@@ -207,6 +218,7 @@ async def username_search(update: Update, username):
         await update.message.reply_text(result_text, parse_mode='Markdown')
     
     except Exception as e:
+        logger.error(f"Error in username_search: {e}") # 7. Log error
         await update.message.reply_text(f"❌ Ошибка при поиске: {str(e)}")
 
 async def website_parse(update: Update, url):
@@ -220,12 +232,13 @@ async def website_parse(update: Update, url):
         }
         
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status() # 8. Ensure request was successful
         soup = BeautifulSoup(response.text, 'html.parser')
         
         
-        title = soup.title.string if soup.title else "Не найдено"
+        title = soup.title.string if soup.title and soup.title.string else "Не найдено" # 9. Handle None string
         meta_desc = soup.find('meta', attrs={'name': 'description'})
-        description = meta_desc['content'] if meta_desc else "Нет описания"
+        description = meta_desc['content'] if meta_desc and 'content' in meta_desc.attrs else "Нет описания"
         
         
         links = soup.find_all('a', href=True)
@@ -242,7 +255,10 @@ async def website_parse(update: Update, url):
         
         await update.message.reply_text(result_text, parse_mode='Markdown')
     
+    except requests.exceptions.RequestException as e: # 10. Handle Request errors
+        await update.message.reply_text(f"❌ Ошибка при доступе к сайту: {e}")
     except Exception as e:
+        logger.error(f"Error in website_parse: {e}") # 11. Log error
         await update.message.reply_text(f"❌ Ошибка при парсинге: {str(e)}")
 
 async def ip_info(update: Update, ip):
@@ -263,6 +279,7 @@ async def ip_info(update: Update, ip):
             
             whois_url = f"https://www.whois.com/whois/{ip}"
             response = requests.get(whois_url, headers=headers, timeout=10)
+            response.raise_for_status() # 12. Check request status
             soup = BeautifulSoup(response.text, 'html.parser')
             
             
@@ -274,10 +291,11 @@ async def ip_info(update: Update, ip):
                 result_text = f"📡 *Информация об IP:* {ip}\n\nНе удалось получить информацию через WHOIS"
                 
             await update.message.reply_text(result_text, parse_mode='Markdown')
-        except:
+        except requests.exceptions.RequestException: # 13. Specific error handling
             await update.message.reply_text("❌ Не удалось получить информацию об IP")
     
     except Exception as e:
+        logger.error(f"Error in ip_info: {e}") # 14. Log error
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 async def wiki_search(update: Update, query):
@@ -289,6 +307,7 @@ async def wiki_search(update: Update, query):
         }
         
         response = requests.get(search_url, headers=headers, timeout=10)
+        response.raise_for_status() # 15. Check request status
         soup = BeautifulSoup(response.text, 'html.parser')
         
         
@@ -306,7 +325,7 @@ async def wiki_search(update: Update, query):
         
         content = soup.find('div', {'id': 'mw-content-text'})
         if content:
-            first_paragraph = content.find('p')
+            first_paragraph = content.find('p', recursive=False) # 16. Find first direct paragraph
             if first_paragraph:
                 summary = first_paragraph.text[:1000] + "..." if len(first_paragraph.text) > 1000 else first_paragraph.text
             else:
@@ -323,6 +342,7 @@ async def wiki_search(update: Update, query):
         await update.message.reply_text(result_text, parse_mode='Markdown')
     
     except Exception as e:
+        logger.error(f"Error in wiki_search: {e}") # 17. Log error
         await update.message.reply_text(f"❌ Ошибка при поиске в Wikipedia: {str(e)}")
 
 async def phone_lookup(update: Update, phone_number):
@@ -351,6 +371,7 @@ async def phone_lookup(update: Update, phone_number):
         await update.message.reply_text(result_text, parse_mode='Markdown')
     
     except Exception as e:
+        logger.error(f"Error in phone_lookup: {e}") # 18. Log error
         await update.message.reply_text(f"❌ Ошибка при проверке номера: {str(e)}")
 
 async def vk_parse(update: Update, username):
@@ -369,6 +390,7 @@ async def vk_parse(update: Update, username):
         }
         
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status() # 19. Check request status
         soup = BeautifulSoup(response.text, 'html.parser')
         
         
@@ -408,7 +430,10 @@ async def vk_parse(update: Update, username):
         
         await update.message.reply_text(result_text, parse_mode='Markdown')
     
+    except requests.exceptions.RequestException as e:
+        await update.message.reply_text(f"❌ Ошибка доступа к ВК: {e}")
     except Exception as e:
+        logger.error(f"Error in vk_parse: {e}") # 20. Log error
         await update.message.reply_text(f"❌ Ошибка при парсинге ВК: {str(e)}")
 
 async def vk_get_id(update: Update, username):
@@ -428,6 +453,7 @@ async def vk_get_id(update: Update, username):
             await update.message.reply_text("❌ Пользователь ВКонтакте не найден")
     
     except Exception as e:
+        logger.error(f"Error in vk_get_id: {e}") # 21. Log error
         await update.message.reply_text(f"❌ Ошибка при получении ID: {str(e)}")
 
 async def tg_get_id(update: Update, username):
@@ -448,9 +474,10 @@ async def tg_get_id(update: Update, username):
             profile_name = "Неизвестно"
             title = soup.find('title')
             if title:
-                profile_name = title.text.replace('Telegram: Contact ', '').strip()
+                # 22. Better text cleaning for Telegram title
+                profile_name = title.text.replace('Telegram: Contact ', '').replace('Telegram: Join ', '').strip()
             
-            #
+            
             description = "Не найдено"
             desc_elem = soup.find('div', {'class': 'tgme_page_description'})
             if desc_elem:
@@ -476,6 +503,7 @@ async def tg_get_id(update: Update, username):
             await update.message.reply_text("❌ Пользователь Telegram не найден")
     
     except Exception as e:
+        logger.error(f"Error in tg_get_id: {e}") # 23. Log error
         await update.message.reply_text(f"❌ Ошибка при получении информации: {str(e)}")
 
 async def get_vk_id(username):
@@ -487,9 +515,10 @@ async def get_vk_id(username):
         }
         
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status() # 24. Check request status
         
         
-        id_match = re.search(r'"uid":"(\d+)"', response.text)
+        id_match = re.search(r'"uid":(\d+)', response.text) # 25. Removed redundant quotes in regex
         if id_match:
             return id_match.group(1)
         
@@ -505,7 +534,11 @@ async def get_vk_id(username):
         
         return None
     
-    except:
+    except requests.exceptions.RequestException as e: # 26. Specific error handling
+        logger.error(f"Error in get_vk_id request: {e}")
+        return None
+    except Exception as e: # 27. Specific error handling
+        logger.error(f"Error in get_vk_id parsing: {e}")
         return None
 
 async def useful_sites(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -538,6 +571,7 @@ async def useful_sites(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(sites_text, parse_mode='Markdown', reply_markup=reply_markup)
     
     except Exception as e:
+        logger.error(f"Error in useful_sites: {e}") # 28. Log error
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 async def useful_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -572,6 +606,7 @@ async def useful_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(bots_text, parse_mode='Markdown', reply_markup=reply_markup)
     
     except Exception as e:
+        logger.error(f"Error in useful_bots: {e}") # 29. Log error
         error_text = f"❌ Ошибка: {str(e)}"
         if update.callback_query:
             await update.callback_query.edit_message_text(error_text)
@@ -582,14 +617,20 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
     
     try:
-        await update.message.reply_text("❌ Произошла ошибка при обработке запроса")
-    except:
-        try:
+        if update.message: # 30. Check if message exists before replying
+            await update.message.reply_text("❌ Произошла ошибка при обработке запроса")
+        elif update.callback_query and update.callback_query.message:
             await update.callback_query.message.reply_text("❌ Произошла ошибка при обработке запроса")
-        except:
+        else:
             pass
+    except:
+        pass # 31. Prevent error in error handler
+        
 
 def main():
+    # 32. Add check for token
+    if not TOKEN or TOKEN == "8289958887:AAFrdtHwtDSZyfI77ECJONkAMXkEF0QbQIQ":
+         print("WARNING: Using default/unsafe token. Set the TELEGRAM_TOKEN environment variable.")
     application = Application.builder().token(TOKEN).build()
     
     
