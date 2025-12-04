@@ -1,0 +1,8 @@
+pyTelegramBotAPI==4.16.1
+requests==2.32.3
+aiohttp==3.10.2
+python-dotenv==1.0.1
+urllib3==2.2.3
+certifi==2024.8.30
+charset-normalizer==3.3.2
+idna==3.7
